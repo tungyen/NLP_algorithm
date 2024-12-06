@@ -220,8 +220,8 @@ class word2vec_skipgram:
             
             
 if __name__ == '__main__':
-    corpusPath = './text8.txt'
-    ckptsPath = './word2vec_skipgram.pth'
+    corpusPath = './data/text8.txt'
+    ckptsPath = './ckpts/word2vec_skipgram.pth'
     maxWindowSize = 5
     negSampleNum = 15
     maxVocSize = 10000
