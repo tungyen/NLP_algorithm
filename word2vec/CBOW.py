@@ -67,10 +67,10 @@ class corpusProcess:
         self.vocList = vocList
         
         
-class skipGramDataset(Dataset):
+class cbowDataset(Dataset):
     
     def __init__(self, corpusData: corpusProcess, maxWindowSize, negSampleNum):
-        super(skipGramDataset, self).__init__()
+        super(cbowDataset, self).__init__()
         corpusWordList = corpusData.encodedWords
         corpusWordNum = len(corpusWordList)
         
@@ -103,36 +103,36 @@ class skipGramDataset(Dataset):
         startIdx = wordIdx - self.maxWindowSize
         endIdx = wordIdx + self.maxWindowSize + 1
         
-        posWordList = torch.IntTensor([self.corpusWordList[curIdx] for curIdx in range(startIdx, endIdx) if curIdx != wordIdx])
+        contexts = torch.IntTensor([self.corpusWordList[curIdx] for curIdx in range(startIdx, endIdx) if curIdx != wordIdx])
         try:
             negWordList = self.curThreading.negWordList
         except:
             negWordList = self.negProb.clone()
             self.curThreading.negWordList = negWordList
             
-        negWordNum = self.negSampleNum * len(posWordList)
+        negWordNum = self.negSampleNum * len(contexts)
         negExclude = [self.corpusWordList[curIdx] for curIdx in range(startIdx, endIdx)]
         negWordList[negExclude] = 0
         
         negWords = torch.multinomial(negWordList, negWordNum, replacement=True)
         negWordList[negExclude] = self.negProb[negExclude]
         
-        return word, posWordList, negWords
+        return contexts, word, negWords
     
     
-class skipGramModel(nn.Module):
+class cbowModel(nn.Module):
     def __init__(self, vocSize, embedSize):
-        super(skipGramModel, self).__init__()
+        super(cbowModel, self).__init__()
         self.vocSize = vocSize
         self.embedSize = embedSize
         self.embedding = nn.Embedding(vocSize, embedSize)
         self.embeddingContext = nn.Embedding(vocSize, embedSize)
         
-    def forward(self, inputWord, pos, neg):
-        inputEmb = self.embedding(inputWord)
+    def forward(self, posContext, word, negContext):
+        inputEmb = self.embedding(word)
         inputEmb = torch.transpose(inputEmb, dim0=2, dim1=1)
-        posEmb = self.embeddingContext(pos)
-        negEmb = self.embeddingContext(neg)
+        posEmb = self.embeddingContext(posContext)
+        negEmb = self.embeddingContext(negContext)
         
         posProb = torch.squeeze(torch.bmm(posEmb, inputEmb), dim=2)
         posProb = torch.sum(nn.functional.logsigmoid(posProb), dim=1)
@@ -145,10 +145,10 @@ class skipGramModel(nn.Module):
         loss = torch.mean(torch.neg(loss))
         return loss
     
-class word2vec_skipgram:
+class word2vec_CBOW:
     
     def __init__(self, corpusData: corpusProcess, embSize):
-        super(word2vec_skipgram, self).__init__()
+        super(word2vec_CBOW, self).__init__()
         self.corpusData = corpusData
         self.embSize = embSize
         
@@ -162,12 +162,12 @@ class word2vec_skipgram:
         else:
             device = 'cpu'
             
-        dataset = skipGramDataset(self.corpusData, maxWindowSize, negSampleNum)
+        dataset = cbowDataset(self.corpusData, maxWindowSize, negSampleNum)
         dataloader = DataLoader(dataset, batchSize, shuffle=True)
         batchNum = len(dataloader)
         vocSize = len(self.corpusData.vocList)
         
-        model = skipGramModel(vocSize, self.embSize)
+        model = cbowModel(vocSize, self.embSize)
         model = model.to(device)
         opt = torch.optim.SGD(model.parameters(), lr)
         model.train()
@@ -191,7 +191,7 @@ class word2vec_skipgram:
         
     def test(self, ckptsPath, testWords, nearestNum = 10):
         vocSize = len(self.corpusData.vocList)
-        model = skipGramModel(vocSize, self.embSize)
+        model = cbowModel(vocSize, self.embSize)
         
         if not os.path.exists(ckptsPath):
             print("You should train the model first!")
@@ -218,7 +218,7 @@ class word2vec_skipgram:
             idxes = idxes[1:nearestNum+1]
             nearest = [idx2word[i] for i in idxes]
             print(f'{word}: {nearest}')
-
+    
 def parse_args():
     parse = argparse.ArgumentParser(description='Select mode to run the word2vec')
     parse.add_argument('--mode', type=str, default="train", help='Operation mode')
@@ -232,7 +232,7 @@ def parse_args():
     parse.add_argument('--bs', type=int, default=32, help='Batch Size')
     parse.add_argument('--lr', type=int, default=0.2, help='Learning Rate')
     args = parse.parse_args()
-    return args
+    return args     
             
 if __name__ == '__main__':
     args = parse_args()
@@ -247,7 +247,7 @@ if __name__ == '__main__':
         corpusData = corpusProcess(token, args.w_size)
         corpusData.loadData(file)
         
-        word2vec = word2vec_skipgram(corpusData, args.emb_dim)
+        word2vec = word2vec_CBOW(corpusData, args.emb_dim)
         word2vec.train(args.ckptsPath, args.w_size, args.neg_num, args.epochs, args.bs, args.lr)
         
     elif runMode == 'test':
@@ -258,5 +258,5 @@ if __name__ == '__main__':
         corpusData = corpusProcess(token, args.max_voc_size)
         corpusData.loadData(file)
         
-        word2vec = word2vec_skipgram(corpusData, args.emb_dim)
+        word2vec = word2vec_CBOW(corpusData, args.emb_dim)
         word2vec.test(args.ckptsPath, testList)
